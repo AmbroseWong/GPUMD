@@ -810,6 +810,30 @@ static __global__ void find_force_ZBL(
   }
 }
 
+static __global__ void find_force_confine(  
+  const int N,
+  const int N1,
+  const int N2,
+  const Box box,
+  const double* __restrict__ g_z,
+  double* g_fz,
+  double* g_pe)
+  {
+    int n1 = blockIdx.x * blockDim.x + threadIdx.x + N1;
+    if (n1 < N2) {
+      float dd = 0.157543289616; 
+      float a = 1.041678567228; 
+      float z0 = 3.165216089871; 
+      float de = -466.244772989682;
+      float half_width = 3.65;
+      g_pe[n1] += dd*pow(1.0 -exp (-a * (g_z[n1] + half_width - z0)),2) \
+      + dd*pow(1.0 -exp (-a * (half_width - g_z[n1] - z0)),2) + de;
+      g_fz[n1] -= 2*dd*a*(1.0 - exp (-a * (g_z[n1] + half_width - z0)))  \
+      * exp (-a * (g_z[n1] + half_width - z0)) - 2*dd*a*(1.0 -exp (-a * (half_width - g_z[n1] - z0)))\
+      * exp (-a * (half_width - g_z[n1] - z0));
+    }
+  }
+
 // large box fo MD applications
 void NEP3::compute_large_box(
   Box& box,
@@ -890,6 +914,11 @@ void NEP3::compute_large_box(
     box, nep_data.NN_angular.data(), nep_data.NL_angular.data(), nep_data.f12x.data(),
     nep_data.f12y.data(), nep_data.f12z.data(), position_per_atom, force_per_atom, virial_per_atom);
   CUDA_CHECK_KERNEL
+
+  find_force_confine<<<grid_size, BLOCK_SIZE>>>(
+    N, N1, N2, box, position_per_atom.data() + N * 2, force_per_atom.data() + N * 2,
+    potential_per_atom.data());
+  CUDA_CHECK_KERNEL  
 
   if (zbl.enabled) {
     find_force_ZBL<<<grid_size, BLOCK_SIZE>>>(

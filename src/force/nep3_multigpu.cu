@@ -1063,6 +1063,29 @@ static __global__ void find_force_ZBL(
     g_pe[n1] += s_pe;
   }
 }
+static __global__ void find_force_confine(  
+  const int N,
+  const int N1,
+  const int N2,
+  const Box box,
+  const double* __restrict__ g_z,
+  double* g_fz,
+  double* g_pe)
+  {
+    int n1 = blockIdx.x * blockDim.x + threadIdx.x + N1;
+    if (n1 < N2) {
+      float dd = 0.157543289616; 
+      float a = 1.041678567228; 
+      float z0 = 3.165216089871; 
+      float de = -466.244772989682;
+      float half_width = 3.65;
+      g_pe[n1] += dd*pow(1.0 -exp (-a * (g_z[n1] + half_width - z0)),2) \
+      + dd*pow(1.0 -exp (-a * (half_width - g_z[n1] - z0)),2) + de;
+      g_fz[n1] -= 2*dd*a*(1.0 - exp (-a * (g_z[n1] + half_width - z0)))  \
+      * exp (-a * (g_z[n1] + half_width - z0)) - 2*dd*a*(1.0 -exp (-a * (half_width - g_z[n1] - z0)))\
+      * exp (-a * (half_width - g_z[n1] - z0));
+    }
+  }
 
 static __global__ void distribute_position(
   const int num_atoms_gobal,
@@ -1447,6 +1470,14 @@ void NEP3_MULTIGPU::compute(
       nep_data[gpu].force.data() + nep_temp_data.num_atoms_per_gpu * 2,
       nep_data[gpu].virial.data());
     CUDA_CHECK_KERNEL
+
+    find_force_confine<<<
+      (nep_data[gpu].N2 - nep_data[gpu].N1 - 1) / 64 + 1, 64, 0, nep_data[gpu].stream>>>(
+        nep_temp_data.num_atoms_per_gpu,  nep_data[gpu].N1, nep_data[gpu].N2, box,
+        nep_data[gpu].position.data() + nep_temp_data.num_atoms_per_gpu * 2,
+        nep_data[gpu].force.data() + nep_temp_data.num_atoms_per_gpu * 2,
+        nep_data[gpu].potential.data());
+    CUDA_CHECK_KERNEL  
 
     if (zbl.enabled) {
       find_force_ZBL<<<
